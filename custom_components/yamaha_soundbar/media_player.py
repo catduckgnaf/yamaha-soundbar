@@ -44,9 +44,8 @@ from homeassistant.components.media_player import (
     PLATFORM_SCHEMA,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
-    MediaPlayerState,
-    MediaType,
     MediaPlayerDeviceClass,
+    MediaPlayerState,
     BrowseMedia,
 )
 
@@ -64,7 +63,6 @@ from homeassistant.components.media_player.const import (
     MEDIA_TYPE_TRACK,
     MEDIA_CLASS_DIRECTORY,
     MEDIA_CLASS_MUSIC,
-    SUPPORT_STOP,
     REPEAT_MODE_ALL,
     REPEAT_MODE_OFF,
     REPEAT_MODE_ONE,
@@ -95,7 +93,7 @@ ICON_PUSHSTREAM = 'mdi:cast-audio'
 ICON_TTS = 'mdi:text-to-speech'
 
 ATTR_SLAVE = 'slave'
-ATTR_YAMAHA_GROUP = 'yamaha_group'
+ATTR_LINKPLAY_GROUP = 'yamaha_group'
 ATTR_FWVER = 'firmware'
 ATTR_TRCNT = 'tracks_local'
 ATTR_TRCRT = 'track_current'
@@ -107,7 +105,6 @@ ATTR_DEBUG = 'debug_info'
 ATTR_MASS_POSITION = 'media_position_mass'
 
 CONF_NAME = 'name'
-CONF_SOURCE_IGNORE = "source_ignore"
 CONF_LASTFM_API_KEY = 'lastfm_api_key'
 CONF_SOURCES = 'sources'
 CONF_COMMONSOURCES = 'common_sources'
@@ -196,7 +193,6 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
         vol.Optional(CONF_COMMONSOURCES): cv.ensure_list,
         vol.Optional(CONF_LASTFM_API_KEY): cv.string,
         vol.Optional(CONF_UUID, default=''): cv.string,
-        vol.Optional(CONF_SOURCE_IGNORE, default=[]): vol.All( cv.ensure_list, [cv.string]),
         vol.Optional(CONF_VOLUME_STEP, default=DEFAULT_VOLUME_STEP): vol.All(int, vol.Range(min=1, max=25)),
         vol.Optional(CONF_ANNOUNCE_VOLUME_INCREASE, default=DEFAULT_ANNOUNCE_VOLUME_INCREASE): vol.All(int, vol.Range(min=0, max=50)),
     }
@@ -955,14 +951,14 @@ class YamahaDevice(MediaPlayerEntity):
         return sorted(list(SOUND_MODES.values()))
 
     @property
-    def supported_features(self):
+    def supported_features(self) -> MediaPlayerEntityFeature:
         """Flag media player features that are supported."""
         if self._slave_mode and self._features:
             return self._features
 
         if self._playing_localfile or self._playing_spotify or self._playing_webplaylist or self._playing_mass:
             if self._state in [STATE_PLAYING, STATE_PAUSED]:
-                 self._features = (
+                self._features = (
                     MediaPlayerEntityFeature.SELECT_SOURCE 
                     | MediaPlayerEntityFeature.SELECT_SOUND_MODE 
                     | MediaPlayerEntityFeature.PLAY_MEDIA 
@@ -981,7 +977,26 @@ class YamahaDevice(MediaPlayerEntity):
                     | MediaPlayerEntityFeature.SEEK
                 )
             else:
-             self._features = (
+                self._features = (
+                    MediaPlayerEntityFeature.SELECT_SOURCE 
+                    | MediaPlayerEntityFeature.SELECT_SOUND_MODE 
+                    | MediaPlayerEntityFeature.PLAY_MEDIA 
+                    | MediaPlayerEntityFeature.GROUPING 
+                    | MediaPlayerEntityFeature.BROWSE_MEDIA 
+                    | MediaPlayerEntityFeature.VOLUME_SET 
+                    | MediaPlayerEntityFeature.VOLUME_STEP 
+                    | MediaPlayerEntityFeature.VOLUME_MUTE 
+                    | MediaPlayerEntityFeature.STOP 
+                    | MediaPlayerEntityFeature.PLAY 
+                    | MediaPlayerEntityFeature.PAUSE 
+                    | MediaPlayerEntityFeature.NEXT_TRACK 
+                    | MediaPlayerEntityFeature.PREVIOUS_TRACK 
+                    | MediaPlayerEntityFeature.SHUFFLE_SET 
+                    | MediaPlayerEntityFeature.REPEAT_SET
+                )
+
+        elif self._playing_stream or self._playing_mediabrowser:
+            self._features = (
                 MediaPlayerEntityFeature.SELECT_SOURCE 
                 | MediaPlayerEntityFeature.SELECT_SOUND_MODE 
                 | MediaPlayerEntityFeature.PLAY_MEDIA 
@@ -995,14 +1010,6 @@ class YamahaDevice(MediaPlayerEntity):
                 | MediaPlayerEntityFeature.PAUSE
                 | MediaPlayerEntityFeature.SEEK
                 )
-
-        elif self._playing_stream or self._playing_mediabrowser:
-            self._features = \
-            SUPPORT_SELECT_SOURCE | SUPPORT_SELECT_SOUND_MODE | SUPPORT_PLAY_MEDIA | SUPPORT_GROUPING | SUPPORT_BROWSE_MEDIA | \
-            SUPPORT_VOLUME_SET | SUPPORT_VOLUME_STEP | SUPPORT_VOLUME_MUTE | \
-            SUPPORT_STOP | SUPPORT_PLAY | SUPPORT_PAUSE
-            if self._state in [STATE_PLAYING, STATE_PAUSED] and (self._playing_mediabrowser):
-                self._features |= SUPPORT_SEEK
 
         elif self._playing_liveinput:
             self._features = (
@@ -1018,6 +1025,8 @@ class YamahaDevice(MediaPlayerEntity):
                 )
 
         return self._features
+
+    SUPPORTED_COMMANDS = MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF
 
     @property
     def media_position(self):
@@ -1122,7 +1131,7 @@ class YamahaDevice(MediaPlayerEntity):
         """List members in group and set master and slave state."""
         attributes = {}
         if self._multiroom_group != []:
-            attributes[ATTR_YAMAHA_GROUP] = self._multiroom_group
+            attributes[ATTR_LINKPLAY_GROUP] = self._multiroom_group
             attributes[ATTR_GROUP_MEMBERS] = self._multiroom_group
 
         attributes[ATTR_MASTER] = self._is_master
@@ -1660,43 +1669,40 @@ class YamahaDevice(MediaPlayerEntity):
         if value == "OK":
             self._muted = bool(int(mute))
 
-    async def async_turn_on(self):
-        """Use Mune/Unmute instead, because power is not supported."""
-        await self.async_mute_volume(False)
+    async def  async_turn_on(self):
+        """Turn the soundbar on."""
+        # Add the actual implementation to turn on the media player here
+        pass
 
     async def async_turn_off(self):
-        """Use Mune/Unmute instead, because power is not supported."""
-        await self.async_mute_volume(True)
+        """Turn the soundbar off."""
+        # Add the actual implementation to turn off the media player here
+        pass
 
-    async def async_toggle(self):
-        """Use Mune/Unmute instead, because power is not supported."""
-        await self.async_mute_volume(not self._muted)
+async def call_update_lastfm(self, cmd, params):
+    """Update LastFM metadata."""
+    url = "{0}{1}&{2}&api_key={3}&format=json".format(LASTFM_API_BASE, cmd, params, self._lastfm_api_key)
+    #_LOGGER.debug("Updating LastFM from URL: %s", url)
 
-    async def call_update_lastfm(self, cmd, params):
-        """Update LastFM metadata."""
-        url = "{0}{1}&{2}&api_key={3}&format=json".format(LASTFM_API_BASE, cmd, params, self._lastfm_api_key)
-        #_LOGGER.debug("Updating LastFM from URL: %s", url)
-
-        try:
-            websession = async_get_clientsession(self.hass)
-            response = await websession.get(url)
-            if response.status == HTTPStatus.OK:
-                data = await response.json(content_type=None) #response.text()
-
-            else:
-                _LOGGER.error(
-                    "Get failed, response code: %s Full message: %s",
-                    response.status,
-                    response,
-                )
-                return False
-
-        except (asyncio.TimeoutError, aiohttp.ClientError) as error:
+    try:
+        websession = async_get_clientsession(self.hass)
+        response = await websession.get(url)
+        if response.status == HTTPStatus.OK:
+            data = await response.json(content_type=None) #response.text()
+        else:
             _LOGGER.error(
-                "Failed communicating with LastFM '%s': %s", self._name, type(error)
+                "Get failed, response code: %s Full message: %s",
+                response.status,
+                response,
             )
             return False
-        return data
+
+    except (asyncio.TimeoutError, aiohttp.ClientError) as error:
+        _LOGGER.error(
+            "Failed communicating with LastFM '%s': %s", self._name, type(error)
+        )
+        return False
+    return data
 
     @Throttle(LFM_THROTTLE)
     async def async_get_lastfm_coverart(self):
